@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Clockify API Key",
+        "description": "Enter your Clockify API key. You can find it in your Clockify profile settings.",
+        "data": {
+          "api_key": "API Key"
+        }
+      },
+      "workspace": {
+        "title": "Select Workspace",
+        "description": "Choose the workspace to track time for.",
+        "data": {
+          "workspace_id": "Workspace"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check your API key."
+    },
+    "abort": {
+      "already_configured": "This workspace is already configured."
+    }
+  }
+}

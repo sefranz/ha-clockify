@@ -1,0 +1,62 @@
+name: {{.ProjectName}}
+
+services:
+  {{.ProjectName}}:
+    build:
+      context: .
+    image: orca-{{.ProjectName}}
+    container_name: {{.ProjectName}}
+    volumes:
+{{- if .WorkspaceVolumeName}}
+      - type: volume
+        source: workspace
+        target: /workspace
+{{- else}}
+      - type: bind
+        source: {{.WorkspaceDir}}
+        target: /workspace
+{{- end}}
+      - type: bind
+        source: {{.ClaudeSessionDir}}
+        target: /home/claude/.claude
+    working_dir: /workspace
+    privileged: true
+    user: claude
+    # Publishes the container's on-demand sshd (started by `orca intellij`) on a
+    # stable, project-derived localhost port. Bound to 127.0.0.1 so it is never
+    # exposed on the LAN. Nothing listens until `orca intellij` starts sshd, so
+    # this is a no-op for VS Code / CLI-only users.
+    ports:
+      - "127.0.0.1:{{.SSHPort}}:2222"
+{{- if .PodmanKeepID}}
+    userns_mode: "keep-id"
+{{- end}}
+    environment:
+      - PATH=/home/claude/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - HOST_WORKSPACE_DIR={{.HostWorkspaceDir}}
+{{formatEnvVars .EnvVars}}
+    stdin_open: true
+    tty: true
+{{- if .WorkspaceVolumeName}}
+
+  dind:
+    image: docker:dind
+    privileged: true
+    # needed, to allow docker to communicate (within the docker-compose boundary)
+    # without requiring any certificates
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    volumes:
+      - dind-storage:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  dind-storage:
+  workspace:
+    external: true
+    name: {{.WorkspaceVolumeName}}
+{{- end}}

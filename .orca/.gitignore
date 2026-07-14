@@ -1,0 +1,11 @@
+# Generated container files
+container/
+
+# Local overrides (per-checkout configuration)
+config.local.json
+
+# Claude data directory
+claude-data/
+
+# Session directories
+sessions/

@@ -1,0 +1,43 @@
+start_tracking:
+  name: Start Tracking
+  description: Start a new time entry in Clockify.
+  fields:
+    project_id:
+      name: Project ID
+      description: The Clockify project ID to track time against.
+      required: false
+      example: "60b..."
+      selector:
+        text:
+    description:
+      name: Description
+      description: Description for the time entry.
+      required: false
+      example: "Working on feature X"
+      selector:
+        text:
+    billable:
+      name: Billable
+      description: Whether the entry is billable.
+      required: false
+      default: false
+      selector:
+        boolean:
+
+stop_tracking:
+  name: Stop Tracking
+  description: Stop the currently running time entry.
+
+resume_entry:
+  name: Resume Entry
+  description: Resume one of the last 10 time entries (starts a new entry with the same project, description, and tags).
+  fields:
+    entry_index:
+      name: Entry Index
+      description: Index of the recent entry to resume (1 = most recent, up to 10).
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 10

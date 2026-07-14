@@ -1,0 +1,13 @@
+{
+  "project_name": "ha-clockify",
+  "model_config": "bedrock-claude",
+  "engine": "docker",
+  "exclude_patterns": [
+    "node_modules/",
+    "target/",
+    ".cache/",
+    "vendor/",
+    "dist/",
+    "build/"
+  ]
+}
