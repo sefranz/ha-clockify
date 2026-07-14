@@ -1,0 +1,39 @@
+#!/bin/bash
+# Start Home Assistant with the Clockify integration for development.
+# Access at http://localhost:8123
+#
+# First run will require onboarding (create user account).
+# Then go to Settings > Devices & Services > Add Integration > Clockify.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+
+if [ ! -d "$ROOT_DIR/.venv" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv "$ROOT_DIR/.venv"
+    source "$ROOT_DIR/.venv/bin/activate"
+    pip install --upgrade pip wheel
+    pip install homeassistant "josepy<2"
+else
+    source "$ROOT_DIR/.venv/bin/activate"
+fi
+
+CONFIG_DIR="$ROOT_DIR/config"
+mkdir -p "$CONFIG_DIR"
+ln -sf "$ROOT_DIR/custom_components" "$CONFIG_DIR/custom_components" 2>/dev/null || true
+
+if [ ! -f "$CONFIG_DIR/configuration.yaml" ]; then
+    cat > "$CONFIG_DIR/configuration.yaml" <<EOF
+default_config:
+logger:
+  default: info
+  logs:
+    custom_components.clockify: debug
+EOF
+fi
+
+echo "Starting Home Assistant at http://localhost:8123"
+echo "Press Ctrl+C to stop."
+exec hass -c "$CONFIG_DIR"
