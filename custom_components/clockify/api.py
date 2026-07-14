@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
@@ -33,7 +33,7 @@ class ClockifyApiClient:
         entries = await self._request(
             "GET",
             f"/workspaces/{workspace_id}/user/{user_id}/time-entries",
-            params={"in-progress": "true"},
+            params={"in-progress": "true", "hydrated": "true"},
         )
         if entries:
             return entries[0]
@@ -46,6 +46,53 @@ class ClockifyApiClient:
             "GET",
             f"/workspaces/{workspace_id}/user/{user_id}/time-entries",
             params={"page-size": str(limit), "hydrated": "true"},
+        )
+
+    async def get_today_entries(
+        self, workspace_id: str, user_id: str
+    ) -> list[dict]:
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return await self._request(
+            "GET",
+            f"/workspaces/{workspace_id}/user/{user_id}/time-entries",
+            params={
+                "start": today_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "page-size": "200",
+            },
+        )
+
+    async def get_yesterday_entries(
+        self, workspace_id: str, user_id: str
+    ) -> list[dict]:
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        yesterday_start = today_start - timedelta(days=1)
+        return await self._request(
+            "GET",
+            f"/workspaces/{workspace_id}/user/{user_id}/time-entries",
+            params={
+                "start": yesterday_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": today_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "page-size": "200",
+            },
+        )
+
+    async def get_week_entries(
+        self, workspace_id: str, user_id: str
+    ) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - timedelta(days=today_start.weekday())
+        return await self._request(
+            "GET",
+            f"/workspaces/{workspace_id}/user/{user_id}/time-entries",
+            params={
+                "start": week_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "page-size": "500",
+            },
         )
 
     async def start_entry(

@@ -4,7 +4,7 @@ start_tracking:
   fields:
     project_id:
       name: Project ID
-      description: The Clockify project ID to track time against.
+      description: The Clockify project ID. If omitted, uses the project selected in the Project select entity.
       required: false
       example: "60b..."
       selector:
@@ -30,12 +30,12 @@ stop_tracking:
 
 resume_entry:
   name: Resume Entry
-  description: Resume one of the last 10 time entries (starts a new entry with the same project, description, and tags).
+  description: Resume a recent time entry (starts a new entry with the same project, description, and tags). If entry_index is omitted, resumes the entry selected in the Recent Entry select entity.
   fields:
     entry_index:
       name: Entry Index
-      description: Index of the recent entry to resume (1 = most recent, up to 10).
-      required: true
+      description: Index of the recent entry to resume (1 = most recent, up to 10). If omitted, uses the Recent Entry select entity.
+      required: false
       example: 1
       selector:
         number:

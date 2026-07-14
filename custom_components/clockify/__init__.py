@@ -12,7 +12,7 @@ from .coordinator import ClockifyDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "select"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -48,11 +48,20 @@ def _register_services(hass: HomeAssistant) -> None:
             raise ValueError("No Clockify integration configured")
         return coordinators[0]
 
+    def _resolve_project_id(
+        call: ServiceCall, coordinator: ClockifyDataUpdateCoordinator
+    ) -> str | None:
+        project_id = call.data.get("project_id")
+        if project_id:
+            return project_id
+        return getattr(coordinator, "selected_project_id", None)
+
     async def handle_start_tracking(call: ServiceCall) -> None:
         coordinator = await _get_coordinator(call)
+        project_id = _resolve_project_id(call, coordinator)
         await coordinator.client.start_entry(
             workspace_id=coordinator.workspace_id,
-            project_id=call.data.get("project_id"),
+            project_id=project_id,
             description=call.data.get("description", ""),
             billable=call.data.get("billable", False),
         )
@@ -67,11 +76,19 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_resume_entry(call: ServiceCall) -> None:
         coordinator = await _get_coordinator(call)
-        index = call.data["entry_index"] - 1
+        entry_index = call.data.get("entry_index")
+        if entry_index is not None:
+            index = entry_index - 1
+        elif coordinator.selected_recent_index is not None:
+            index = coordinator.selected_recent_index
+        else:
+            raise ValueError(
+                "No entry_index provided and no recent entry selected"
+            )
         recent = coordinator.data.get("recent", [])
         if index >= len(recent):
             raise ValueError(
-                f"Entry index {call.data['entry_index']} out of range "
+                f"Entry index {index + 1} out of range "
                 f"(only {len(recent)} recent entries available)"
             )
         entry = recent[index]
@@ -108,5 +125,5 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         "resume_entry",
         handle_resume_entry,
-        schema=vol.Schema({vol.Required("entry_index"): vol.All(int, vol.Range(1, 10))}),
+        schema=vol.Schema({vol.Optional("entry_index"): vol.All(int, vol.Range(1, 10))}),
     )

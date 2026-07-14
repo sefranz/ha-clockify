@@ -27,6 +27,10 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
         self.client = client
         self.workspace_id = workspace_id
         self.user_id = user_id
+        self.selected_project_id: str | None = None
+        self.work_project_id: str | None = None
+        self.personal_project_id: str | None = None
+        self.selected_recent_index: int | None = None
 
     async def _async_update_data(self) -> dict:
         try:
@@ -35,6 +39,15 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
             )
             recent = await self.client.get_recent_entries(
                 self.workspace_id, self.user_id, RECENT_ENTRIES_LIMIT
+            )
+            today = await self.client.get_today_entries(
+                self.workspace_id, self.user_id
+            )
+            yesterday = await self.client.get_yesterday_entries(
+                self.workspace_id, self.user_id
+            )
+            week = await self.client.get_week_entries(
+                self.workspace_id, self.user_id
             )
             projects = await self.client.get_projects(self.workspace_id)
         except Exception as err:
@@ -45,5 +58,8 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
         return {
             "running": running,
             "recent": recent,
+            "today": today,
+            "yesterday": yesterday,
+            "week": week,
             "projects": projects_map,
         }
