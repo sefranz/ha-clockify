@@ -17,6 +17,7 @@ async def async_setup_entry(
         ClockifyWorkProjectSelect(coordinator, entry),
         ClockifyPersonalProjectSelect(coordinator, entry),
         ClockifyRecentEntrySelect(coordinator, entry),
+        ClockifyTaskSelect(coordinator, entry),
     ])
 
 
@@ -53,6 +54,7 @@ class ClockifyProjectSelect(CoordinatorEntity, SelectEntity):
                 self.coordinator.selected_project_id = project_id
                 break
         self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
 
 class ClockifyWorkProjectSelect(CoordinatorEntity, SelectEntity):
@@ -170,5 +172,42 @@ class ClockifyRecentEntrySelect(CoordinatorEntity, SelectEntity):
             if self._entry_label(entry, i) == option:
                 self._selected_index = i
                 self.coordinator.selected_recent_index = i
+                break
+        self.async_write_ha_state()
+
+
+class ClockifyTaskSelect(CoordinatorEntity, SelectEntity):
+    """Lets the user pick a task from the project selected in the Project select entity."""
+
+    def __init__(
+        self, coordinator: ClockifyDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_task_select"
+        self._attr_has_entity_name = True
+        self._attr_name = "Task"
+        self._attr_icon = "mdi:checkbox-marked-outline"
+        self._selected_task_id: str | None = None
+
+    @property
+    def options(self) -> list[str]:
+        if not self.coordinator.data:
+            return []
+        tasks = self.coordinator.data.get("tasks", {})
+        return list(tasks.values())
+
+    @property
+    def current_option(self) -> str | None:
+        if not self._selected_task_id or not self.coordinator.data:
+            return None
+        tasks = self.coordinator.data.get("tasks", {})
+        return tasks.get(self._selected_task_id)
+
+    async def async_select_option(self, option: str) -> None:
+        tasks = self.coordinator.data.get("tasks", {})
+        for task_id, name in tasks.items():
+            if name == option:
+                self._selected_task_id = task_id
+                self.coordinator.selected_task_id = task_id
                 break
         self.async_write_ha_state()

@@ -62,6 +62,13 @@ def _project_meta(project_details: dict, project_id: str | None) -> dict:
     return project_details.get(project_id, {})
 
 
+def _task_name(entry: dict) -> str:
+    if not entry.get("taskId"):
+        return "No task"
+    task = entry.get("task") or {}
+    return task.get("name", "Unknown")
+
+
 def _entry_attributes(
     entry: dict, index: int, projects: dict, project_details: dict
 ) -> dict:
@@ -72,6 +79,8 @@ def _entry_attributes(
         "description": entry.get("description") or "No description",
         "project": _project_name(projects, project_id),
         "project_id": project_id,
+        "task": _task_name(entry),
+        "task_id": entry.get("taskId"),
         "duration": _format_duration(entry),
         "start": entry.get("timeInterval", {}).get("start"),
         "end": entry.get("timeInterval", {}).get("end"),
@@ -125,6 +134,8 @@ class ClockifyStatusSensor(ClockifyBaseSensor):
             "description": entry.get("description") or "No description",
             "project": _project_name(projects, project_id),
             "project_id": project_id,
+            "task": _task_name(entry),
+            "task_id": entry.get("taskId"),
             "billable": entry.get("billable", False),
             "tag_ids": entry.get("tagIds", []),
             "start": entry.get("timeInterval", {}).get("start"),
@@ -154,7 +165,11 @@ class ClockifyProjectSensor(ClockifyBaseSensor):
             return {}
         project_id = entry.get("projectId")
         project_details = self.coordinator.data.get("project_details", {})
-        attrs = {"project_id": project_id}
+        attrs = {
+            "project_id": project_id,
+            "task": _task_name(entry),
+            "task_id": entry.get("taskId"),
+        }
         meta = _project_meta(project_details, project_id)
         if meta:
             attrs["project_client_id"] = meta.get("client_id")
@@ -197,6 +212,8 @@ class ClockifyStartTimeSensor(ClockifyBaseSensor):
             "description": entry.get("description") or "No description",
             "project": _project_name(projects, project_id),
             "project_id": project_id,
+            "task": _task_name(entry),
+            "task_id": entry.get("taskId"),
             "billable": entry.get("billable", False),
             "tag_ids": entry.get("tagIds", []),
             "elapsed_seconds": elapsed_seconds,
@@ -226,6 +243,8 @@ class ClockifyDescriptionSensor(ClockifyBaseSensor):
             "entry_id": entry.get("id"),
             "project": _project_name(projects, project_id),
             "project_id": project_id,
+            "task": _task_name(entry),
+            "task_id": entry.get("taskId"),
             "billable": entry.get("billable", False),
             "tag_ids": entry.get("tagIds", []),
             "start": entry.get("timeInterval", {}).get("start"),

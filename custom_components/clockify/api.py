@@ -29,6 +29,11 @@ class ClockifyApiClient:
     async def get_projects(self, workspace_id: str) -> list[dict]:
         return await self._request("GET", f"/workspaces/{workspace_id}/projects")
 
+    async def get_tasks(self, workspace_id: str, project_id: str) -> list[dict]:
+        return await self._request(
+            "GET", f"/workspaces/{workspace_id}/projects/{project_id}/tasks"
+        )
+
     async def get_running_entry(self, workspace_id: str, user_id: str) -> dict | None:
         entries = await self._request(
             "GET",
@@ -60,6 +65,7 @@ class ClockifyApiClient:
             params={
                 "start": today_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "page-size": "200",
+                "hydrated": "true",
             },
         )
 
@@ -77,6 +83,7 @@ class ClockifyApiClient:
                 "start": yesterday_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "end": today_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "page-size": "200",
+                "hydrated": "true",
             },
         )
 
@@ -92,6 +99,7 @@ class ClockifyApiClient:
             params={
                 "start": week_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "page-size": "500",
+                "hydrated": "true",
             },
         )
 
@@ -102,6 +110,7 @@ class ClockifyApiClient:
         description: str = "",
         billable: bool = False,
         tag_ids: list[str] | None = None,
+        task_id: str | None = None,
     ) -> dict:
         payload = {
             "start": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -109,6 +118,7 @@ class ClockifyApiClient:
             "billable": billable,
             "projectId": project_id,
             "tagIds": tag_ids or [],
+            "taskId": task_id,
         }
         return await self._request(
             "POST", f"/workspaces/{workspace_id}/time-entries", json=payload

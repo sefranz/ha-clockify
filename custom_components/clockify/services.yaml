@@ -23,6 +23,13 @@ start_tracking:
       default: false
       selector:
         boolean:
+    task_id:
+      name: Task ID
+      description: The Clockify task ID. If omitted, uses the task selected in the Task select entity.
+      required: false
+      example: "60c..."
+      selector:
+        text:
 
 stop_tracking:
   name: Stop Tracking
@@ -30,7 +37,7 @@ stop_tracking:
 
 resume_entry:
   name: Resume Entry
-  description: Resume a recent time entry (starts a new entry with the same project, description, and tags). If entry_index is omitted, resumes the entry selected in the Recent Entry select entity.
+  description: Resume a recent time entry (starts a new entry with the same project, task, description, and tags). If entry_index is omitted, resumes the entry selected in the Recent Entry select entity.
   fields:
     entry_index:
       name: Entry Index

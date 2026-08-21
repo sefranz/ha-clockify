@@ -56,14 +56,27 @@ def _register_services(hass: HomeAssistant) -> None:
             return project_id
         return getattr(coordinator, "selected_project_id", None)
 
+    def _resolve_task_id(
+        call: ServiceCall, coordinator: ClockifyDataUpdateCoordinator
+    ) -> str | None:
+        task_id = call.data.get("task_id")
+        if task_id:
+            return task_id
+        selected = getattr(coordinator, "selected_task_id", None)
+        if selected and coordinator.data and selected in coordinator.data.get("tasks", {}):
+            return selected
+        return None
+
     async def handle_start_tracking(call: ServiceCall) -> None:
         coordinator = await _get_coordinator(call)
         project_id = _resolve_project_id(call, coordinator)
+        task_id = _resolve_task_id(call, coordinator)
         await coordinator.client.start_entry(
             workspace_id=coordinator.workspace_id,
             project_id=project_id,
             description=call.data.get("description", ""),
             billable=call.data.get("billable", False),
+            task_id=task_id,
         )
         await coordinator.async_request_refresh()
 
@@ -98,6 +111,7 @@ def _register_services(hass: HomeAssistant) -> None:
             description=entry.get("description", ""),
             billable=entry.get("billable", False),
             tag_ids=entry.get("tagIds"),
+            task_id=entry.get("taskId"),
         )
         await coordinator.async_request_refresh()
 
@@ -110,6 +124,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("project_id"): str,
                 vol.Optional("description", default=""): str,
                 vol.Optional("billable", default=False): bool,
+                vol.Optional("task_id"): str,
             }
         ),
     )
