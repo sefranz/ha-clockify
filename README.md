@@ -74,25 +74,27 @@ All data comes from one `DataUpdateCoordinator` that polls Clockify every 60 sec
 
 ### Today / Yesterday / Week statistics
 
-Each period has the same 4-layer × 2-measure grid: entry count (+ list) and duration, each filterable by **work** project, **personal** project, the general **project** select, or **overall** (unfiltered). Yesterday's duration excludes any still-open entry (it's really still running today); Today's and Week's duration count it up to now.
+Each period has the same 4-layer × 2-measure grid: entry count (+ list) and duration, each filterable by **work project**, **personal project**, the general **project** select, or **overall** (unfiltered). A layer with nothing selected in its corresponding select reports zero/empty — it never silently falls back to "all entries". Yesterday's duration excludes any still-open entry (it's really still running today); Today's and Week's duration count it up to now.
 
 | Layer | Entries sensor | Duration sensor |
 |-------|-----------------|------------------|
-| Overall | `sensor.today_s_entries` | `sensor.today_s_duration` |
-| Work | `sensor.today_s_work_entries` | `sensor.today_s_work_duration` |
-| Personal | `sensor.today_s_personal_entries` | `sensor.today_s_personal_duration` |
-| Project | `sensor.today_s_project_entries` | `sensor.today_s_project_duration` |
+| Overall | `sensor.today_entries` | `sensor.today_duration` |
+| Work project | `sensor.today_work_project_entries` | `sensor.today_work_project_duration` |
+| Personal project | `sensor.today_personal_project_entries` | `sensor.today_personal_project_duration` |
+| Project (general select) | `sensor.today_project_entries` | `sensor.today_project_duration` |
 
-Same pattern with `yesterday_s_*` and `week_s_*` in place of `today_s_*` (24 sensors total across the three periods).
+Same pattern with `yesterday_*` and `week_*` in place of `today_*` (24 sensors total across the three periods).
 
 ### Client-level statistics
 
-Client sensors aggregate across **every project belonging to that client**, not just one project (a Clockify client can have many projects). Currently work/personal only, for today and week:
+Client sensors aggregate across **every project belonging to that client**, not just one project (a Clockify client can have many projects). Same period coverage as the project grid above (Today/Yesterday/Week × entries/duration), but only 2 layers — **overall** and the general **project** select don't apply to a client filter the same way:
 
-| Entity | Reports |
-|--------|---------|
-| `sensor.today_s_work_client_duration` / `sensor.today_s_personal_client_duration` | Today's duration across all projects under the selected work/personal client |
-| `sensor.week_s_work_client_entries` / `sensor.week_s_work_client_duration` | This week's entry count/duration across all projects under the selected work client |
+| Layer | Entries sensor | Duration sensor |
+|-------|-----------------|------------------|
+| Work client | `sensor.today_work_client_entries` | `sensor.today_work_client_duration` |
+| Personal client | `sensor.today_personal_client_entries` | `sensor.today_personal_client_duration` |
+
+Same pattern with `yesterday_*_client_*` and `week_*_client_*` (12 sensors total across the three periods).
 
 All sensors include additional attributes with raw entry data (project/client/task names and IDs, billable status, tag IDs, per-entry lists, etc.).
 
