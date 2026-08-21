@@ -23,14 +23,34 @@ async def async_setup_entry(
             ClockifyDescriptionSensor(coordinator, entry),
             ClockifyTaskSensor(coordinator, entry),
             ClockifyRecentEntriesSensor(coordinator, entry),
+            # Today
             ClockifyTodayEntriesSensor(coordinator, entry),
-            ClockifyYesterdayEntriesSensor(coordinator, entry),
+            ClockifyTodayWorkEntriesSensor(coordinator, entry),
+            ClockifyTodayPersonalEntriesSensor(coordinator, entry),
+            ClockifyTodayProjectEntriesSensor(coordinator, entry),
             ClockifyTodayDurationSensor(coordinator, entry),
-            ClockifyYesterdayDurationSensor(coordinator, entry),
             ClockifyTodayWorkDurationSensor(coordinator, entry),
             ClockifyTodayPersonalDurationSensor(coordinator, entry),
+            ClockifyTodayProjectDurationSensor(coordinator, entry),
+            # Yesterday
+            ClockifyYesterdayEntriesSensor(coordinator, entry),
+            ClockifyYesterdayWorkEntriesSensor(coordinator, entry),
+            ClockifyYesterdayPersonalEntriesSensor(coordinator, entry),
+            ClockifyYesterdayProjectEntriesSensor(coordinator, entry),
+            ClockifyYesterdayDurationSensor(coordinator, entry),
+            ClockifyYesterdayWorkDurationSensor(coordinator, entry),
+            ClockifyYesterdayPersonalDurationSensor(coordinator, entry),
+            ClockifyYesterdayProjectDurationSensor(coordinator, entry),
+            # Week
+            ClockifyWeekEntriesSensor(coordinator, entry),
             ClockifyWeekWorkEntriesSensor(coordinator, entry),
+            ClockifyWeekPersonalEntriesSensor(coordinator, entry),
+            ClockifyWeekProjectEntriesSensor(coordinator, entry),
+            ClockifyWeekDurationSensor(coordinator, entry),
             ClockifyWeekWorkDurationSensor(coordinator, entry),
+            ClockifyWeekPersonalDurationSensor(coordinator, entry),
+            ClockifyWeekProjectDurationSensor(coordinator, entry),
+            # Client-level (work/personal only)
             ClockifyTodayWorkClientDurationSensor(coordinator, entry),
             ClockifyTodayPersonalClientDurationSensor(coordinator, entry),
             ClockifyWeekWorkClientEntriesSensor(coordinator, entry),
@@ -109,6 +129,50 @@ def _entry_attributes(
         attrs["project_color"] = meta.get("color")
         attrs["project_billable"] = meta.get("billable")
     return attrs
+
+
+def _layer_project_id(coordinator: ClockifyDataUpdateCoordinator, layer: str) -> str | None:
+    if layer == "work":
+        return coordinator.work_project_id
+    if layer == "personal":
+        return coordinator.personal_project_id
+    if layer == "project":
+        return coordinator.selected_project_id
+    return None
+
+
+def _period_entries(coordinator_data: dict, period_key: str, project_id: str | None) -> list[dict]:
+    entries = coordinator_data.get(period_key, [])
+    if project_id is None:
+        return entries
+    return [e for e in entries if e.get("projectId") == project_id]
+
+
+def _duration_breakdown(
+    entries: list[dict], treat_open_as_now: bool
+) -> tuple[int, int, int, int]:
+    now = datetime.now(timezone.utc)
+    total = billable = non_billable = 0
+    for entry in entries:
+        interval = entry.get("timeInterval", {})
+        start_str = interval.get("start")
+        if not start_str:
+            continue
+        end_str = interval.get("end")
+        if not end_str:
+            if not treat_open_as_now:
+                continue
+            end = now
+        else:
+            end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+        start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        seconds = int((end - start).total_seconds())
+        total += seconds
+        if entry.get("billable", False):
+            billable += seconds
+        else:
+            non_billable += seconds
+    return total, billable, non_billable, len(entries)
 
 
 class ClockifyBaseSensor(CoordinatorEntity, SensorEntity):
@@ -356,94 +420,154 @@ class ClockifyRecentEntriesSensor(ClockifyBaseSensor):
         return {"entries": entries}
 
 
-class _ClockifyDayEntriesSensor(ClockifyBaseSensor):
-    """Base for sensors that list a day's entries in attributes."""
+class _ClockifyLayeredEntriesSensor(ClockifyBaseSensor):
+    """Base for entry-count/list sensors filtered by a period + layer.
 
-    _day_key: str = "today"
+    Layer is one of "overall", "work", "personal", "project" — resolved to a
+    project_id (or None for "overall") via the matching coordinator selection.
+    """
+
+    _period_key: str = "today"
+    _layer: str = "overall"
+
+    def _get_project_id(self) -> str | None:
+        return _layer_project_id(self.coordinator, self._layer)
+
+    def _filtered_entries(self) -> list[dict]:
+        if not self.coordinator.data:
+            return []
+        return _period_entries(self.coordinator.data, self._period_key, self._get_project_id())
 
     @property
     def native_value(self) -> int | None:
         if not self.coordinator.data:
             return None
-        return len(self.coordinator.data.get(self._day_key, []))
+        return len(self._filtered_entries())
 
     @property
     def extra_state_attributes(self) -> dict:
         if not self.coordinator.data:
             return {}
-        day_entries = self.coordinator.data.get(self._day_key, [])
         projects = self.coordinator.data.get("projects", {})
         project_details = self.coordinator.data.get("project_details", {})
+        project_id = self._get_project_id()
         entries = [
             _entry_attributes(entry, i + 1, projects, project_details)
-            for i, entry in enumerate(day_entries)
+            for i, entry in enumerate(self._filtered_entries())
         ]
-        return {"entries": entries}
+        if self._layer == "overall":
+            attrs = {"project": "All projects", "project_id": None}
+        else:
+            attrs = {
+                "project": projects.get(project_id, "None") if project_id else "None",
+                "project_id": project_id,
+            }
+        attrs["entries"] = entries
+        return attrs
 
 
-class ClockifyTodayEntriesSensor(_ClockifyDayEntriesSensor):
-    _day_key = "today"
+class _ClockifyLayeredDurationSensor(ClockifyBaseSensor):
+    """Base for duration sensors filtered by a period + layer.
+
+    See _ClockifyLayeredEntriesSensor for what "layer" means. treat_open_as_now
+    controls whether a still-running entry counts up to "now" (today/week) or
+    is excluded (yesterday, since an open entry there is really still ongoing
+    today and would otherwise inflate yesterday's total).
+    """
+
+    _period_key: str = "today"
+    _layer: str = "overall"
+    _treat_open_as_now: bool = True
+
+    def _get_project_id(self) -> str | None:
+        return _layer_project_id(self.coordinator, self._layer)
+
+    def _filtered_entries(self) -> list[dict]:
+        if not self.coordinator.data:
+            return []
+        return _period_entries(self.coordinator.data, self._period_key, self._get_project_id())
+
+    @property
+    def native_value(self) -> int:
+        total, _billable, _non_billable, _count = _duration_breakdown(
+            self._filtered_entries(), self._treat_open_as_now
+        )
+        return total
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        _total, billable, non_billable, count = _duration_breakdown(
+            self._filtered_entries(), self._treat_open_as_now
+        )
+        project_id = self._get_project_id()
+        if self._layer == "overall":
+            attrs = {"project": "All projects", "project_id": None}
+        else:
+            projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
+            project_details = (
+                self.coordinator.data.get("project_details", {})
+                if self.coordinator.data
+                else {}
+            )
+            attrs = {
+                "project": projects.get(project_id, "None") if project_id else "None",
+                "project_id": project_id,
+            }
+            meta = _project_meta(project_details, project_id)
+            if meta:
+                attrs["project_client_id"] = meta.get("client_id")
+                attrs["project_client"] = meta.get("client_name")
+                attrs["project_color"] = meta.get("color")
+                attrs["project_billable"] = meta.get("billable")
+        attrs["entry_count"] = count
+        attrs["billable_seconds"] = billable
+        attrs["non_billable_seconds"] = non_billable
+        return attrs
+
+
+# --- Today ---------------------------------------------------------------
+
+class ClockifyTodayEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "today"
+    _layer = "overall"
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "today_entries", "Today's Entries")
         self._attr_icon = "mdi:calendar-today"
 
 
-class ClockifyYesterdayEntriesSensor(_ClockifyDayEntriesSensor):
-    _day_key = "yesterday"
+class ClockifyTodayWorkEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "today"
+    _layer = "work"
 
     def __init__(self, coordinator, entry) -> None:
-        super().__init__(coordinator, entry, "yesterday_entries", "Yesterday's Entries")
-        self._attr_icon = "mdi:calendar-minus"
+        super().__init__(coordinator, entry, "today_work_entries", "Today's Work Entries")
+        self._attr_icon = "mdi:briefcase-outline"
 
 
-class ClockifyYesterdayDurationSensor(ClockifyBaseSensor):
+class ClockifyTodayPersonalEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "today"
+    _layer = "personal"
+
     def __init__(self, coordinator, entry) -> None:
-        super().__init__(coordinator, entry, "yesterday_duration", "Yesterday's Duration")
-        self._attr_icon = "mdi:calendar-clock"
-        self._attr_device_class = SensorDeviceClass.DURATION
-        self._attr_native_unit_of_measurement = "s"
-        self._attr_suggested_unit_of_measurement = "h"
-
-    def _entries(self) -> list[dict]:
-        if not self.coordinator.data:
-            return []
-        return self.coordinator.data.get("yesterday", [])
-
-    def _breakdown(self) -> tuple[int, int, int, int]:
-        entries = self._entries()
-        total = billable = non_billable = 0
-        for entry in entries:
-            interval = entry.get("timeInterval", {})
-            start_str = interval.get("start")
-            end_str = interval.get("end")
-            if not start_str or not end_str:
-                continue
-            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-            seconds = int((end - start).total_seconds())
-            total += seconds
-            if entry.get("billable", False):
-                billable += seconds
-            else:
-                non_billable += seconds
-        return total, billable, non_billable, len(entries)
-
-    @property
-    def native_value(self) -> int:
-        return self._breakdown()[0]
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        _total, billable, non_billable, count = self._breakdown()
-        return {
-            "entry_count": count,
-            "billable_seconds": billable,
-            "non_billable_seconds": non_billable,
-        }
+        super().__init__(coordinator, entry, "today_personal_entries", "Today's Personal Entries")
+        self._attr_icon = "mdi:account-outline"
 
 
-class ClockifyTodayDurationSensor(ClockifyBaseSensor):
+class ClockifyTodayProjectEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "today"
+    _layer = "project"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "today_project_entries", "Today's Project Entries")
+        self._attr_icon = "mdi:folder-outline"
+
+
+class ClockifyTodayDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "today"
+    _layer = "overall"
+    _treat_open_as_now = True
+
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "today_duration", "Today's Duration")
         self._attr_icon = "mdi:calendar-clock"
@@ -451,104 +575,12 @@ class ClockifyTodayDurationSensor(ClockifyBaseSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    def _breakdown(self) -> tuple[int, int, int, int]:
-        if not self.coordinator.data:
-            return 0, 0, 0, 0
-        today_entries = self.coordinator.data.get("today", [])
-        now = datetime.now(timezone.utc)
-        total = billable = non_billable = 0
-        for entry in today_entries:
-            interval = entry.get("timeInterval", {})
-            start_str = interval.get("start")
-            if not start_str:
-                continue
-            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            end_str = interval.get("end")
-            end = (
-                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-                if end_str
-                else now
-            )
-            seconds = int((end - start).total_seconds())
-            total += seconds
-            if entry.get("billable", False):
-                billable += seconds
-            else:
-                non_billable += seconds
-        return total, billable, non_billable, len(today_entries)
 
-    @property
-    def native_value(self) -> int:
-        return self._breakdown()[0]
+class ClockifyTodayWorkDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "today"
+    _layer = "work"
+    _treat_open_as_now = True
 
-    @property
-    def extra_state_attributes(self) -> dict:
-        _total, billable, non_billable, count = self._breakdown()
-        return {
-            "entry_count": count,
-            "billable_seconds": billable,
-            "non_billable_seconds": non_billable,
-        }
-
-
-class _ClockifyFilteredDurationSensor(ClockifyBaseSensor):
-    def _get_project_id(self) -> str | None:
-        raise NotImplementedError
-
-    def _filtered_entries(self) -> list[dict]:
-        if not self.coordinator.data:
-            return []
-        project_id = self._get_project_id()
-        if not project_id:
-            return []
-        return [
-            e for e in self.coordinator.data.get("today", [])
-            if e.get("projectId") == project_id
-        ]
-
-    @property
-    def native_value(self) -> int:
-        now = datetime.now(timezone.utc)
-        total = 0
-        for entry in self._filtered_entries():
-            interval = entry.get("timeInterval", {})
-            start_str = interval.get("start")
-            if not start_str:
-                continue
-            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            end_str = interval.get("end")
-            end = (
-                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-                if end_str
-                else now
-            )
-            total += int((end - start).total_seconds())
-        return total
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
-        project_details = (
-            self.coordinator.data.get("project_details", {})
-            if self.coordinator.data
-            else {}
-        )
-        project_id = self._get_project_id()
-        attrs = {
-            "project": projects.get(project_id, "None") if project_id else "None",
-            "project_id": project_id,
-            "entry_count": len(self._filtered_entries()),
-        }
-        meta = _project_meta(project_details, project_id)
-        if meta:
-            attrs["project_client_id"] = meta.get("client_id")
-            attrs["project_client"] = meta.get("client_name")
-            attrs["project_color"] = meta.get("color")
-            attrs["project_billable"] = meta.get("billable")
-        return attrs
-
-
-class ClockifyTodayWorkDurationSensor(_ClockifyFilteredDurationSensor):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(
             coordinator, entry, "today_work_duration", "Today's Work Duration"
@@ -558,11 +590,12 @@ class ClockifyTodayWorkDurationSensor(_ClockifyFilteredDurationSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    def _get_project_id(self) -> str | None:
-        return self.coordinator.work_project_id
 
+class ClockifyTodayPersonalDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "today"
+    _layer = "personal"
+    _treat_open_as_now = True
 
-class ClockifyTodayPersonalDurationSensor(_ClockifyFilteredDurationSensor):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(
             coordinator, entry, "today_personal_duration", "Today's Personal Duration"
@@ -572,51 +605,178 @@ class ClockifyTodayPersonalDurationSensor(_ClockifyFilteredDurationSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    def _get_project_id(self) -> str | None:
-        return self.coordinator.personal_project_id
+
+class ClockifyTodayProjectDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "today"
+    _layer = "project"
+    _treat_open_as_now = True
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "today_project_duration", "Today's Project Duration"
+        )
+        self._attr_icon = "mdi:folder-clock-outline"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
 
 
-class ClockifyWeekWorkEntriesSensor(ClockifyBaseSensor):
+# --- Yesterday -------------------------------------------------------------
+
+class ClockifyYesterdayEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "yesterday"
+    _layer = "overall"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "yesterday_entries", "Yesterday's Entries")
+        self._attr_icon = "mdi:calendar-minus"
+
+
+class ClockifyYesterdayWorkEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "yesterday"
+    _layer = "work"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "yesterday_work_entries", "Yesterday's Work Entries")
+        self._attr_icon = "mdi:briefcase-outline"
+
+
+class ClockifyYesterdayPersonalEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "yesterday"
+    _layer = "personal"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "yesterday_personal_entries", "Yesterday's Personal Entries"
+        )
+        self._attr_icon = "mdi:account-outline"
+
+
+class ClockifyYesterdayProjectEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "yesterday"
+    _layer = "project"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "yesterday_project_entries", "Yesterday's Project Entries"
+        )
+        self._attr_icon = "mdi:folder-outline"
+
+
+class ClockifyYesterdayDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "yesterday"
+    _layer = "overall"
+    _treat_open_as_now = False
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "yesterday_duration", "Yesterday's Duration")
+        self._attr_icon = "mdi:calendar-clock"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+
+class ClockifyYesterdayWorkDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "yesterday"
+    _layer = "work"
+    _treat_open_as_now = False
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "yesterday_work_duration", "Yesterday's Work Duration"
+        )
+        self._attr_icon = "mdi:briefcase-clock-outline"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+
+class ClockifyYesterdayPersonalDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "yesterday"
+    _layer = "personal"
+    _treat_open_as_now = False
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "yesterday_personal_duration", "Yesterday's Personal Duration"
+        )
+        self._attr_icon = "mdi:account-clock-outline"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+
+class ClockifyYesterdayProjectDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "yesterday"
+    _layer = "project"
+    _treat_open_as_now = False
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "yesterday_project_duration", "Yesterday's Project Duration"
+        )
+        self._attr_icon = "mdi:folder-clock-outline"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+
+# --- Week --------------------------------------------------------------
+
+class ClockifyWeekEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "week"
+    _layer = "overall"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "week_entries", "Week's Entries")
+        self._attr_icon = "mdi:calendar-week"
+
+
+class ClockifyWeekWorkEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "week"
+    _layer = "work"
+
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "week_work_entries", "Week's Work Entries")
         self._attr_icon = "mdi:calendar-week"
 
-    def _filtered_entries(self) -> list[dict]:
-        if not self.coordinator.data:
-            return []
-        project_id = self.coordinator.work_project_id
-        if not project_id:
-            return []
-        return [
-            e for e in self.coordinator.data.get("week", [])
-            if e.get("projectId") == project_id
-        ]
 
-    @property
-    def native_value(self) -> int:
-        return len(self._filtered_entries())
+class ClockifyWeekPersonalEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "week"
+    _layer = "personal"
 
-    @property
-    def extra_state_attributes(self) -> dict:
-        projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
-        project_details = (
-            self.coordinator.data.get("project_details", {})
-            if self.coordinator.data
-            else {}
-        )
-        project_id = self.coordinator.work_project_id
-        entries = [
-            _entry_attributes(entry, i + 1, projects, project_details)
-            for i, entry in enumerate(self._filtered_entries())
-        ]
-        return {
-            "project": projects.get(project_id, "None") if project_id else "None",
-            "project_id": project_id,
-            "entries": entries,
-        }
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "week_personal_entries", "Week's Personal Entries")
+        self._attr_icon = "mdi:calendar-week"
 
 
-class ClockifyWeekWorkDurationSensor(ClockifyBaseSensor):
+class ClockifyWeekProjectEntriesSensor(_ClockifyLayeredEntriesSensor):
+    _period_key = "week"
+    _layer = "project"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "week_project_entries", "Week's Project Entries")
+        self._attr_icon = "mdi:calendar-week"
+
+
+class ClockifyWeekDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "week"
+    _layer = "overall"
+    _treat_open_as_now = True
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "week_duration", "Week's Duration")
+        self._attr_icon = "mdi:calendar-week"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+
+class ClockifyWeekWorkDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "week"
+    _layer = "work"
+    _treat_open_as_now = True
+
     def __init__(self, coordinator, entry) -> None:
         super().__init__(
             coordinator, entry, "week_work_duration", "Week's Work Duration"
@@ -626,58 +786,38 @@ class ClockifyWeekWorkDurationSensor(ClockifyBaseSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    def _filtered_entries(self) -> list[dict]:
-        if not self.coordinator.data:
-            return []
-        project_id = self.coordinator.work_project_id
-        if not project_id:
-            return []
-        return [
-            e for e in self.coordinator.data.get("week", [])
-            if e.get("projectId") == project_id
-        ]
 
-    @property
-    def native_value(self) -> int:
-        now = datetime.now(timezone.utc)
-        total = 0
-        for entry in self._filtered_entries():
-            interval = entry.get("timeInterval", {})
-            start_str = interval.get("start")
-            if not start_str:
-                continue
-            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            end_str = interval.get("end")
-            end = (
-                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-                if end_str
-                else now
-            )
-            total += int((end - start).total_seconds())
-        return total
+class ClockifyWeekPersonalDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "week"
+    _layer = "personal"
+    _treat_open_as_now = True
 
-    @property
-    def extra_state_attributes(self) -> dict:
-        projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
-        project_details = (
-            self.coordinator.data.get("project_details", {})
-            if self.coordinator.data
-            else {}
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "week_personal_duration", "Week's Personal Duration"
         )
-        project_id = self.coordinator.work_project_id
-        attrs = {
-            "project": projects.get(project_id, "None") if project_id else "None",
-            "project_id": project_id,
-            "entry_count": len(self._filtered_entries()),
-        }
-        meta = _project_meta(project_details, project_id)
-        if meta:
-            attrs["project_client_id"] = meta.get("client_id")
-            attrs["project_client"] = meta.get("client_name")
-            attrs["project_color"] = meta.get("color")
-            attrs["project_billable"] = meta.get("billable")
-        return attrs
+        self._attr_icon = "mdi:calendar-week"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
 
+
+class ClockifyWeekProjectDurationSensor(_ClockifyLayeredDurationSensor):
+    _period_key = "week"
+    _layer = "project"
+    _treat_open_as_now = True
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "week_project_duration", "Week's Project Duration"
+        )
+        self._attr_icon = "mdi:calendar-week"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+
+# --- Client-level (work/personal only, per user's explicit scope choice) ---
 
 class _ClockifyFilteredClientDurationSensor(ClockifyBaseSensor):
     def _get_client_id(self) -> str | None:

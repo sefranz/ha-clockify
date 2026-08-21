@@ -43,14 +43,58 @@ Navigate to your [Clockify Profile Settings](https://app.clockify.me/user/prefer
 
 ## Entities
 
-| Entity | Description |
-|--------|-------------|
-| `sensor.clockify_status` | `tracking` or `idle` |
-| `sensor.clockify_current_project` | Name of the active project |
-| `sensor.clockify_current_duration` | Elapsed time (HH:MM:SS) |
-| `sensor.clockify_current_description` | Description of the running entry |
+All data comes from one `DataUpdateCoordinator` that polls Clockify every 60 seconds and fetches the running entry, recent entries, today/yesterday/week entries, projects, tasks (for whichever project is currently selected), and clients in one pass. Several sensors also depend on the `select.*` entities below — picking a value there changes what a sensor reports, without needing a new poll for most of them.
 
-All sensors include additional attributes with raw entry data.
+### Selects (filters used by the sensors below)
+
+| Entity | Sets |
+|--------|------|
+| `select.project` | `project_id` fallback for `start_tracking`, and scopes `select.task`'s options |
+| `select.work_project` / `select.personal_project` | the project used by "Work" / "Personal" layer sensors |
+| `select.task` | `task_id` fallback for `start_tracking` |
+| `select.work_client` / `select.personal_client` | the client used by "Work Client" / "Personal Client" sensors |
+| `select.recent_entry` | `entry_index` fallback for `resume_entry` |
+
+### Tracking sensors (current running entry)
+
+| Entity | Reports |
+|--------|---------|
+| `sensor.tracking_status` | `tracking` or `idle` |
+| `sensor.tracking_project` | Project name of the running entry |
+| `sensor.tracking_client` | Client name of the running entry's project |
+| `sensor.tracking_task` | Task name of the running entry |
+| `sensor.tracking_description` | Description of the running entry |
+| `sensor.tracking_start_time` | Start timestamp of the running entry |
+
+### Recent entries
+
+| Entity | Reports |
+|--------|---------|
+| `sensor.recent_entries` | Count of your last 10 entries; full list (description, project, task, duration, billable, tags) in attributes |
+
+### Today / Yesterday / Week statistics
+
+Each period has the same 4-layer × 2-measure grid: entry count (+ list) and duration, each filterable by **work** project, **personal** project, the general **project** select, or **overall** (unfiltered). Yesterday's duration excludes any still-open entry (it's really still running today); Today's and Week's duration count it up to now.
+
+| Layer | Entries sensor | Duration sensor |
+|-------|-----------------|------------------|
+| Overall | `sensor.today_s_entries` | `sensor.today_s_duration` |
+| Work | `sensor.today_s_work_entries` | `sensor.today_s_work_duration` |
+| Personal | `sensor.today_s_personal_entries` | `sensor.today_s_personal_duration` |
+| Project | `sensor.today_s_project_entries` | `sensor.today_s_project_duration` |
+
+Same pattern with `yesterday_s_*` and `week_s_*` in place of `today_s_*` (24 sensors total across the three periods).
+
+### Client-level statistics
+
+Client sensors aggregate across **every project belonging to that client**, not just one project (a Clockify client can have many projects). Currently work/personal only, for today and week:
+
+| Entity | Reports |
+|--------|---------|
+| `sensor.today_s_work_client_duration` / `sensor.today_s_personal_client_duration` | Today's duration across all projects under the selected work/personal client |
+| `sensor.week_s_work_client_entries` / `sensor.week_s_work_client_duration` | This week's entry count/duration across all projects under the selected work client |
+
+All sensors include additional attributes with raw entry data (project/client/task names and IDs, billable status, tag IDs, per-entry lists, etc.).
 
 ## Services
 
@@ -60,7 +104,8 @@ Start a new time entry.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `project_id` | No | Clockify project ID |
+| `project_id` | No | Clockify project ID. Falls back to `select.project` if omitted |
+| `task_id` | No | Clockify task ID. Falls back to `select.task` if omitted |
 | `description` | No | Entry description |
 | `billable` | No | Whether the entry is billable (default: `false`) |
 
@@ -70,11 +115,11 @@ Stop the currently running time entry. No parameters.
 
 ### `clockify.resume_entry`
 
-Resume a recent time entry (creates a new entry with the same project, description, and tags).
+Resume a recent time entry (creates a new entry with the same project, task, description, and tags).
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `entry_index` | Yes | Index of the recent entry to resume (1 = most recent, up to 10) |
+| `entry_index` | No | Index of the recent entry to resume (1 = most recent, up to 10). Falls back to `select.recent_entry` if omitted |
 
 ## Automation Example
 
