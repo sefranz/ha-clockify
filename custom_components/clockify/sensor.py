@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -175,6 +176,15 @@ def _duration_breakdown(
     return total, billable, non_billable, len(entries)
 
 
+def _device_info(entry: ConfigEntry) -> DeviceInfo:
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name="Clockify",
+        manufacturer="Clockify",
+        entry_type=DeviceEntryType.SERVICE,
+    )
+
+
 class ClockifyBaseSensor(CoordinatorEntity, SensorEntity):
     def __init__(
         self,
@@ -187,6 +197,7 @@ class ClockifyBaseSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_has_entity_name = True
         self._attr_name = name
+        self._attr_device_info = _device_info(entry)
 
     @property
     def _running_entry(self) -> dict | None:

@@ -1,11 +1,21 @@
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import ClockifyDataUpdateCoordinator
+
+
+def _device_info(entry: ConfigEntry) -> DeviceInfo:
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name="Clockify",
+        manufacturer="Clockify",
+        entry_type=DeviceEntryType.SERVICE,
+    )
 
 
 async def async_setup_entry(
@@ -32,6 +42,7 @@ class ClockifyProjectSelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Project"
         self._attr_icon = "mdi:folder-outline"
+        self._attr_device_info = _device_info(entry)
         self._selected_project_id: str | None = None
 
     @property
@@ -68,6 +79,7 @@ class ClockifyWorkProjectSelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Work Project"
         self._attr_icon = "mdi:briefcase-outline"
+        self._attr_device_info = _device_info(entry)
         self._selected_project_id: str | None = None
 
     @property
@@ -103,6 +115,7 @@ class ClockifyPersonalProjectSelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Personal Project"
         self._attr_icon = "mdi:account-outline"
+        self._attr_device_info = _device_info(entry)
         self._selected_project_id: str | None = None
 
     @property
@@ -138,6 +151,7 @@ class ClockifyRecentEntrySelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Recent Entry"
         self._attr_icon = "mdi:history"
+        self._attr_device_info = _device_info(entry)
         self._selected_index: int | None = None
 
     def _entry_label(self, entry: dict, index: int) -> str:
@@ -189,6 +203,7 @@ class ClockifyTaskSelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Task"
         self._attr_icon = "mdi:checkbox-marked-outline"
+        self._attr_device_info = _device_info(entry)
         self._selected_task_id: str | None = None
 
     @property
@@ -224,6 +239,7 @@ class ClockifyWorkClientSelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Work Client"
         self._attr_icon = "mdi:domain"
+        self._attr_device_info = _device_info(entry)
         self._selected_client_id: str | None = None
 
     @property
@@ -259,6 +275,7 @@ class ClockifyPersonalClientSelect(CoordinatorEntity, SelectEntity):
         self._attr_has_entity_name = True
         self._attr_name = "Personal Client"
         self._attr_icon = "mdi:domain"
+        self._attr_device_info = _device_info(entry)
         self._selected_client_id: str | None = None
 
     @property
