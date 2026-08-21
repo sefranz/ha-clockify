@@ -54,6 +54,15 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with Clockify API: {err}") from err
 
         projects_map = {p["id"]: p["name"] for p in projects}
+        project_details = {
+            p["id"]: {
+                "client_id": p.get("clientId"),
+                "color": p.get("color"),
+                "billable": p.get("billable", False),
+                "archived": p.get("archived", False),
+            }
+            for p in projects
+        }
 
         return {
             "running": running,
@@ -62,4 +71,5 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
             "yesterday": yesterday,
             "week": week,
             "projects": projects_map,
+            "project_details": project_details,
         }

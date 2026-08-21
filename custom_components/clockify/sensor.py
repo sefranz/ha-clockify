@@ -34,6 +34,58 @@ async def async_setup_entry(
     )
 
 
+def _format_duration(entry: dict) -> str:
+    interval = entry.get("timeInterval", {})
+    start_str = interval.get("start")
+    end_str = interval.get("end")
+    if not start_str or not end_str:
+        return "in progress"
+    start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+    total_seconds = int((end - start).total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _project_name(projects: dict, project_id: str | None) -> str:
+    if not project_id:
+        return "No project"
+    return projects.get(project_id, "Unknown")
+
+
+def _project_meta(project_details: dict, project_id: str | None) -> dict:
+    if not project_id:
+        return {}
+    return project_details.get(project_id, {})
+
+
+def _entry_attributes(
+    entry: dict, index: int, projects: dict, project_details: dict
+) -> dict:
+    project_id = entry.get("projectId")
+    attrs = {
+        "index": index,
+        "id": entry.get("id"),
+        "description": entry.get("description") or "No description",
+        "project": _project_name(projects, project_id),
+        "project_id": project_id,
+        "duration": _format_duration(entry),
+        "start": entry.get("timeInterval", {}).get("start"),
+        "end": entry.get("timeInterval", {}).get("end"),
+        "billable": entry.get("billable", False),
+        "tag_ids": entry.get("tagIds", []),
+    }
+    meta = _project_meta(project_details, project_id)
+    if meta:
+        attrs["project_client_id"] = meta.get("client_id")
+        attrs["project_color"] = meta.get("color")
+        attrs["project_billable"] = meta.get("billable")
+    return attrs
+
+
 class ClockifyBaseSensor(CoordinatorEntity, SensorEntity):
     def __init__(
         self,
@@ -63,9 +115,20 @@ class ClockifyStatusSensor(ClockifyBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
-        if not self._running_entry:
+        entry = self._running_entry
+        if not entry:
             return {}
-        return {"entry_id": self._running_entry.get("id")}
+        projects = self.coordinator.data.get("projects", {})
+        project_id = entry.get("projectId")
+        return {
+            "entry_id": entry.get("id"),
+            "description": entry.get("description") or "No description",
+            "project": _project_name(projects, project_id),
+            "project_id": project_id,
+            "billable": entry.get("billable", False),
+            "tag_ids": entry.get("tagIds", []),
+            "start": entry.get("timeInterval", {}).get("start"),
+        }
 
 
 class ClockifyProjectSensor(ClockifyBaseSensor):
@@ -89,7 +152,15 @@ class ClockifyProjectSensor(ClockifyBaseSensor):
         entry = self._running_entry
         if not entry:
             return {}
-        return {"project_id": entry.get("projectId")}
+        project_id = entry.get("projectId")
+        project_details = self.coordinator.data.get("project_details", {})
+        attrs = {"project_id": project_id}
+        meta = _project_meta(project_details, project_id)
+        if meta:
+            attrs["project_client_id"] = meta.get("client_id")
+            attrs["project_color"] = meta.get("color")
+            attrs["project_billable"] = meta.get("billable")
+        return attrs
 
 
 class ClockifyStartTimeSensor(ClockifyBaseSensor):
@@ -108,6 +179,29 @@ class ClockifyStartTimeSensor(ClockifyBaseSensor):
             return None
         return datetime.fromisoformat(start_str.replace("Z", "+00:00"))
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        entry = self._running_entry
+        if not entry:
+            return {}
+        projects = self.coordinator.data.get("projects", {})
+        project_id = entry.get("projectId")
+        start = self.native_value
+        elapsed_seconds = (
+            int((datetime.now(timezone.utc) - start).total_seconds())
+            if start
+            else None
+        )
+        return {
+            "entry_id": entry.get("id"),
+            "description": entry.get("description") or "No description",
+            "project": _project_name(projects, project_id),
+            "project_id": project_id,
+            "billable": entry.get("billable", False),
+            "tag_ids": entry.get("tagIds", []),
+            "elapsed_seconds": elapsed_seconds,
+        }
+
 
 class ClockifyDescriptionSensor(ClockifyBaseSensor):
     def __init__(self, coordinator, entry) -> None:
@@ -120,6 +214,22 @@ class ClockifyDescriptionSensor(ClockifyBaseSensor):
         if not entry:
             return None
         return entry.get("description") or "No description"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        entry = self._running_entry
+        if not entry:
+            return {}
+        projects = self.coordinator.data.get("projects", {})
+        project_id = entry.get("projectId")
+        return {
+            "entry_id": entry.get("id"),
+            "project": _project_name(projects, project_id),
+            "project_id": project_id,
+            "billable": entry.get("billable", False),
+            "tag_ids": entry.get("tagIds", []),
+            "start": entry.get("timeInterval", {}).get("start"),
+        }
 
 
 class ClockifyTaskSensor(ClockifyBaseSensor):
@@ -142,28 +252,19 @@ class ClockifyTaskSensor(ClockifyBaseSensor):
         entry = self._running_entry
         if not entry:
             return {}
-        return {"task_id": entry.get("taskId")}
+        projects = self.coordinator.data.get("projects", {})
+        project_id = entry.get("projectId")
+        return {
+            "task_id": entry.get("taskId"),
+            "project": _project_name(projects, project_id),
+            "project_id": project_id,
+        }
 
 
 class ClockifyRecentEntriesSensor(ClockifyBaseSensor):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "recent_entries", "Recent Entries")
         self._attr_icon = "mdi:history"
-
-    def _format_duration(self, entry: dict) -> str:
-        interval = entry.get("timeInterval", {})
-        start_str = interval.get("start")
-        end_str = interval.get("end")
-        if not start_str or not end_str:
-            return "in progress"
-        start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-        total_seconds = int((end - start).total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, _ = divmod(remainder, 60)
-        if hours:
-            return f"{hours}h {minutes}m"
-        return f"{minutes}m"
 
     @property
     def native_value(self) -> int | None:
@@ -178,19 +279,11 @@ class ClockifyRecentEntriesSensor(ClockifyBaseSensor):
             return {}
         recent = self.coordinator.data.get("recent", [])
         projects = self.coordinator.data.get("projects", {})
-        entries = []
-        for i, entry in enumerate(recent):
-            project_id = entry.get("projectId")
-            project_name = projects.get(project_id, "No project") if project_id else "No project"
-            entries.append({
-                "index": i + 1,
-                "description": entry.get("description") or "No description",
-                "project": project_name,
-                "duration": self._format_duration(entry),
-                "start": entry.get("timeInterval", {}).get("start"),
-                "end": entry.get("timeInterval", {}).get("end"),
-                "billable": entry.get("billable", False),
-            })
+        project_details = self.coordinator.data.get("project_details", {})
+        entries = [
+            _entry_attributes(entry, i + 1, projects, project_details)
+            for i, entry in enumerate(recent)
+        ]
         return {"entries": entries}
 
 
@@ -198,21 +291,6 @@ class _ClockifyDayEntriesSensor(ClockifyBaseSensor):
     """Base for sensors that list a day's entries in attributes."""
 
     _day_key: str = "today"
-
-    def _format_duration(self, entry: dict) -> str:
-        interval = entry.get("timeInterval", {})
-        start_str = interval.get("start")
-        end_str = interval.get("end")
-        if not start_str or not end_str:
-            return "in progress"
-        start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-        total_seconds = int((end - start).total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, _ = divmod(remainder, 60)
-        if hours:
-            return f"{hours}h {minutes}m"
-        return f"{minutes}m"
 
     @property
     def native_value(self) -> int | None:
@@ -226,18 +304,11 @@ class _ClockifyDayEntriesSensor(ClockifyBaseSensor):
             return {}
         day_entries = self.coordinator.data.get(self._day_key, [])
         projects = self.coordinator.data.get("projects", {})
-        entries = []
-        for i, entry in enumerate(day_entries):
-            project_id = entry.get("projectId")
-            project_name = projects.get(project_id, "No project") if project_id else "No project"
-            entries.append({
-                "index": i + 1,
-                "description": entry.get("description") or "No description",
-                "project": project_name,
-                "duration": self._format_duration(entry),
-                "start": entry.get("timeInterval", {}).get("start"),
-                "end": entry.get("timeInterval", {}).get("end"),
-            })
+        project_details = self.coordinator.data.get("project_details", {})
+        entries = [
+            _entry_attributes(entry, i + 1, projects, project_details)
+            for i, entry in enumerate(day_entries)
+        ]
         return {"entries": entries}
 
 
@@ -265,13 +336,15 @@ class ClockifyYesterdayDurationSensor(ClockifyBaseSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    @property
-    def native_value(self) -> int:
+    def _entries(self) -> list[dict]:
         if not self.coordinator.data:
-            return 0
-        yesterday_entries = self.coordinator.data.get("yesterday", [])
-        total = 0
-        for entry in yesterday_entries:
+            return []
+        return self.coordinator.data.get("yesterday", [])
+
+    def _breakdown(self) -> tuple[int, int, int, int]:
+        entries = self._entries()
+        total = billable = non_billable = 0
+        for entry in entries:
             interval = entry.get("timeInterval", {})
             start_str = interval.get("start")
             end_str = interval.get("end")
@@ -279,8 +352,26 @@ class ClockifyYesterdayDurationSensor(ClockifyBaseSensor):
                 continue
             start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-            total += int((end - start).total_seconds())
-        return total
+            seconds = int((end - start).total_seconds())
+            total += seconds
+            if entry.get("billable", False):
+                billable += seconds
+            else:
+                non_billable += seconds
+        return total, billable, non_billable, len(entries)
+
+    @property
+    def native_value(self) -> int:
+        return self._breakdown()[0]
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        _total, billable, non_billable, count = self._breakdown()
+        return {
+            "entry_count": count,
+            "billable_seconds": billable,
+            "non_billable_seconds": non_billable,
+        }
 
 
 class ClockifyTodayDurationSensor(ClockifyBaseSensor):
@@ -291,12 +382,12 @@ class ClockifyTodayDurationSensor(ClockifyBaseSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    def _total_seconds_today(self) -> int:
+    def _breakdown(self) -> tuple[int, int, int, int]:
         if not self.coordinator.data:
-            return 0
+            return 0, 0, 0, 0
         today_entries = self.coordinator.data.get("today", [])
         now = datetime.now(timezone.utc)
-        total = 0
+        total = billable = non_billable = 0
         for entry in today_entries:
             interval = entry.get("timeInterval", {})
             start_str = interval.get("start")
@@ -304,58 +395,87 @@ class ClockifyTodayDurationSensor(ClockifyBaseSensor):
                 continue
             start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             end_str = interval.get("end")
-            if end_str:
-                end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            end = (
+                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                if end_str
+                else now
+            )
+            seconds = int((end - start).total_seconds())
+            total += seconds
+            if entry.get("billable", False):
+                billable += seconds
             else:
-                end = now
-            total += int((end - start).total_seconds())
-        return total
+                non_billable += seconds
+        return total, billable, non_billable, len(today_entries)
 
     @property
     def native_value(self) -> int:
-        return self._total_seconds_today()
+        return self._breakdown()[0]
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        _total, billable, non_billable, count = self._breakdown()
+        return {
+            "entry_count": count,
+            "billable_seconds": billable,
+            "non_billable_seconds": non_billable,
+        }
 
 
 class _ClockifyFilteredDurationSensor(ClockifyBaseSensor):
     def _get_project_id(self) -> str | None:
         raise NotImplementedError
 
-    def _total_seconds_for_project(self) -> int:
+    def _filtered_entries(self) -> list[dict]:
         if not self.coordinator.data:
-            return 0
+            return []
         project_id = self._get_project_id()
         if not project_id:
-            return 0
-        today_entries = self.coordinator.data.get("today", [])
+            return []
+        return [
+            e for e in self.coordinator.data.get("today", [])
+            if e.get("projectId") == project_id
+        ]
+
+    @property
+    def native_value(self) -> int:
         now = datetime.now(timezone.utc)
         total = 0
-        for entry in today_entries:
-            if entry.get("projectId") != project_id:
-                continue
+        for entry in self._filtered_entries():
             interval = entry.get("timeInterval", {})
             start_str = interval.get("start")
             if not start_str:
                 continue
             start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             end_str = interval.get("end")
-            if end_str:
-                end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-            else:
-                end = now
+            end = (
+                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                if end_str
+                else now
+            )
             total += int((end - start).total_seconds())
         return total
 
     @property
-    def native_value(self) -> int:
-        return self._total_seconds_for_project()
-
-    @property
     def extra_state_attributes(self) -> dict:
         projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
+        project_details = (
+            self.coordinator.data.get("project_details", {})
+            if self.coordinator.data
+            else {}
+        )
         project_id = self._get_project_id()
-        return {
+        attrs = {
             "project": projects.get(project_id, "None") if project_id else "None",
+            "project_id": project_id,
+            "entry_count": len(self._filtered_entries()),
         }
+        meta = _project_meta(project_details, project_id)
+        if meta:
+            attrs["project_client_id"] = meta.get("client_id")
+            attrs["project_color"] = meta.get("color")
+            attrs["project_billable"] = meta.get("billable")
+        return attrs
 
 
 class ClockifyTodayWorkDurationSensor(_ClockifyFilteredDurationSensor):
@@ -402,21 +522,6 @@ class ClockifyWeekWorkEntriesSensor(ClockifyBaseSensor):
             if e.get("projectId") == project_id
         ]
 
-    def _format_duration(self, entry: dict) -> str:
-        interval = entry.get("timeInterval", {})
-        start_str = interval.get("start")
-        end_str = interval.get("end")
-        if not start_str or not end_str:
-            return "in progress"
-        start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-        total_seconds = int((end - start).total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, _ = divmod(remainder, 60)
-        if hours:
-            return f"{hours}h {minutes}m"
-        return f"{minutes}m"
-
     @property
     def native_value(self) -> int:
         return len(self._filtered_entries())
@@ -424,18 +529,19 @@ class ClockifyWeekWorkEntriesSensor(ClockifyBaseSensor):
     @property
     def extra_state_attributes(self) -> dict:
         projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
+        project_details = (
+            self.coordinator.data.get("project_details", {})
+            if self.coordinator.data
+            else {}
+        )
         project_id = self.coordinator.work_project_id
-        entries = []
-        for i, entry in enumerate(self._filtered_entries()):
-            entries.append({
-                "index": i + 1,
-                "description": entry.get("description") or "No description",
-                "duration": self._format_duration(entry),
-                "start": entry.get("timeInterval", {}).get("start"),
-                "end": entry.get("timeInterval", {}).get("end"),
-            })
+        entries = [
+            _entry_attributes(entry, i + 1, projects, project_details)
+            for i, entry in enumerate(self._filtered_entries())
+        ]
         return {
             "project": projects.get(project_id, "None") if project_id else "None",
+            "project_id": project_id,
             "entries": entries,
         }
 
@@ -450,36 +556,53 @@ class ClockifyWeekWorkDurationSensor(ClockifyBaseSensor):
         self._attr_native_unit_of_measurement = "s"
         self._attr_suggested_unit_of_measurement = "h"
 
-    @property
-    def native_value(self) -> int:
+    def _filtered_entries(self) -> list[dict]:
         if not self.coordinator.data:
-            return 0
+            return []
         project_id = self.coordinator.work_project_id
         if not project_id:
-            return 0
-        week_entries = self.coordinator.data.get("week", [])
+            return []
+        return [
+            e for e in self.coordinator.data.get("week", [])
+            if e.get("projectId") == project_id
+        ]
+
+    @property
+    def native_value(self) -> int:
         now = datetime.now(timezone.utc)
         total = 0
-        for entry in week_entries:
-            if entry.get("projectId") != project_id:
-                continue
+        for entry in self._filtered_entries():
             interval = entry.get("timeInterval", {})
             start_str = interval.get("start")
             if not start_str:
                 continue
             start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             end_str = interval.get("end")
-            if end_str:
-                end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-            else:
-                end = now
+            end = (
+                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                if end_str
+                else now
+            )
             total += int((end - start).total_seconds())
         return total
 
     @property
     def extra_state_attributes(self) -> dict:
         projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
+        project_details = (
+            self.coordinator.data.get("project_details", {})
+            if self.coordinator.data
+            else {}
+        )
         project_id = self.coordinator.work_project_id
-        return {
+        attrs = {
             "project": projects.get(project_id, "None") if project_id else "None",
+            "project_id": project_id,
+            "entry_count": len(self._filtered_entries()),
         }
+        meta = _project_meta(project_details, project_id)
+        if meta:
+            attrs["project_client_id"] = meta.get("client_id")
+            attrs["project_color"] = meta.get("color")
+            attrs["project_billable"] = meta.get("billable")
+        return attrs
