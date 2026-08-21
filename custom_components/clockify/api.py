@@ -34,6 +34,9 @@ class ClockifyApiClient:
             "GET", f"/workspaces/{workspace_id}/projects/{project_id}/tasks"
         )
 
+    async def get_clients(self, workspace_id: str) -> list[dict]:
+        return await self._request("GET", f"/workspaces/{workspace_id}/clients")
+
     async def get_running_entry(self, workspace_id: str, user_id: str) -> dict | None:
         entries = await self._request(
             "GET",

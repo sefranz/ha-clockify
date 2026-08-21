@@ -18,6 +18,8 @@ async def async_setup_entry(
         ClockifyPersonalProjectSelect(coordinator, entry),
         ClockifyRecentEntrySelect(coordinator, entry),
         ClockifyTaskSelect(coordinator, entry),
+        ClockifyWorkClientSelect(coordinator, entry),
+        ClockifyPersonalClientSelect(coordinator, entry),
     ])
 
 
@@ -209,5 +211,75 @@ class ClockifyTaskSelect(CoordinatorEntity, SelectEntity):
             if name == option:
                 self._selected_task_id = task_id
                 self.coordinator.selected_task_id = task_id
+                break
+        self.async_write_ha_state()
+
+
+class ClockifyWorkClientSelect(CoordinatorEntity, SelectEntity):
+    def __init__(
+        self, coordinator: ClockifyDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_work_client_select"
+        self._attr_has_entity_name = True
+        self._attr_name = "Work Client"
+        self._attr_icon = "mdi:domain"
+        self._selected_client_id: str | None = None
+
+    @property
+    def options(self) -> list[str]:
+        if not self.coordinator.data:
+            return []
+        clients = self.coordinator.data.get("clients", {})
+        return list(clients.values())
+
+    @property
+    def current_option(self) -> str | None:
+        if not self._selected_client_id or not self.coordinator.data:
+            return None
+        clients = self.coordinator.data.get("clients", {})
+        return clients.get(self._selected_client_id)
+
+    async def async_select_option(self, option: str) -> None:
+        clients = self.coordinator.data.get("clients", {})
+        for client_id, name in clients.items():
+            if name == option:
+                self._selected_client_id = client_id
+                self.coordinator.work_client_id = client_id
+                break
+        self.async_write_ha_state()
+
+
+class ClockifyPersonalClientSelect(CoordinatorEntity, SelectEntity):
+    def __init__(
+        self, coordinator: ClockifyDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_personal_client_select"
+        self._attr_has_entity_name = True
+        self._attr_name = "Personal Client"
+        self._attr_icon = "mdi:domain"
+        self._selected_client_id: str | None = None
+
+    @property
+    def options(self) -> list[str]:
+        if not self.coordinator.data:
+            return []
+        clients = self.coordinator.data.get("clients", {})
+        return list(clients.values())
+
+    @property
+    def current_option(self) -> str | None:
+        if not self._selected_client_id or not self.coordinator.data:
+            return None
+        clients = self.coordinator.data.get("clients", {})
+        return clients.get(self._selected_client_id)
+
+    async def async_select_option(self, option: str) -> None:
+        clients = self.coordinator.data.get("clients", {})
+        for client_id, name in clients.items():
+            if name == option:
+                self._selected_client_id = client_id
+                self.coordinator.personal_client_id = client_id
                 break
         self.async_write_ha_state()

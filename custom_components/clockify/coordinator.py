@@ -32,6 +32,8 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
         self.personal_project_id: str | None = None
         self.selected_recent_index: int | None = None
         self.selected_task_id: str | None = None
+        self.work_client_id: str | None = None
+        self.personal_client_id: str | None = None
 
     async def _async_update_data(self) -> dict:
         try:
@@ -56,13 +58,16 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
                 if self.selected_project_id
                 else []
             )
+            clients = await self.client.get_clients(self.workspace_id)
         except Exception as err:
             raise UpdateFailed(f"Error communicating with Clockify API: {err}") from err
 
+        clients_map = {c["id"]: c["name"] for c in clients}
         projects_map = {p["id"]: p["name"] for p in projects}
         project_details = {
             p["id"]: {
                 "client_id": p.get("clientId"),
+                "client_name": clients_map.get(p.get("clientId")),
                 "color": p.get("color"),
                 "billable": p.get("billable", False),
                 "archived": p.get("archived", False),
@@ -80,4 +85,5 @@ class ClockifyDataUpdateCoordinator(DataUpdateCoordinator):
             "projects": projects_map,
             "project_details": project_details,
             "tasks": tasks_map,
+            "clients": clients_map,
         }

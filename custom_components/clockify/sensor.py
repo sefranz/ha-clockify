@@ -18,6 +18,7 @@ async def async_setup_entry(
         [
             ClockifyStatusSensor(coordinator, entry),
             ClockifyProjectSensor(coordinator, entry),
+            ClockifyClientSensor(coordinator, entry),
             ClockifyStartTimeSensor(coordinator, entry),
             ClockifyDescriptionSensor(coordinator, entry),
             ClockifyTaskSensor(coordinator, entry),
@@ -30,6 +31,10 @@ async def async_setup_entry(
             ClockifyTodayPersonalDurationSensor(coordinator, entry),
             ClockifyWeekWorkEntriesSensor(coordinator, entry),
             ClockifyWeekWorkDurationSensor(coordinator, entry),
+            ClockifyTodayWorkClientDurationSensor(coordinator, entry),
+            ClockifyTodayPersonalClientDurationSensor(coordinator, entry),
+            ClockifyWeekWorkClientEntriesSensor(coordinator, entry),
+            ClockifyWeekWorkClientDurationSensor(coordinator, entry),
         ]
     )
 
@@ -62,6 +67,16 @@ def _project_meta(project_details: dict, project_id: str | None) -> dict:
     return project_details.get(project_id, {})
 
 
+def _project_ids_for_client(project_details: dict, client_id: str | None) -> set[str]:
+    if not client_id:
+        return set()
+    return {
+        project_id
+        for project_id, meta in project_details.items()
+        if meta.get("client_id") == client_id
+    }
+
+
 def _task_name(entry: dict) -> str:
     if not entry.get("taskId"):
         return "No task"
@@ -90,6 +105,7 @@ def _entry_attributes(
     meta = _project_meta(project_details, project_id)
     if meta:
         attrs["project_client_id"] = meta.get("client_id")
+        attrs["project_client"] = meta.get("client_name")
         attrs["project_color"] = meta.get("color")
         attrs["project_billable"] = meta.get("billable")
     return attrs
@@ -173,9 +189,43 @@ class ClockifyProjectSensor(ClockifyBaseSensor):
         meta = _project_meta(project_details, project_id)
         if meta:
             attrs["project_client_id"] = meta.get("client_id")
+            attrs["project_client"] = meta.get("client_name")
             attrs["project_color"] = meta.get("color")
             attrs["project_billable"] = meta.get("billable")
         return attrs
+
+
+class ClockifyClientSensor(ClockifyBaseSensor):
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "client", "Tracking: Client")
+        self._attr_icon = "mdi:domain"
+
+    @property
+    def native_value(self) -> str | None:
+        entry = self._running_entry
+        if not entry:
+            return None
+        project_id = entry.get("projectId")
+        if not project_id:
+            return "No project"
+        project_details = self.coordinator.data.get("project_details", {})
+        meta = _project_meta(project_details, project_id)
+        return meta.get("client_name") or "No client"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        entry = self._running_entry
+        if not entry:
+            return {}
+        projects = self.coordinator.data.get("projects", {})
+        project_id = entry.get("projectId")
+        project_details = self.coordinator.data.get("project_details", {})
+        meta = _project_meta(project_details, project_id)
+        return {
+            "client_id": meta.get("client_id"),
+            "project": _project_name(projects, project_id),
+            "project_id": project_id,
+        }
 
 
 class ClockifyStartTimeSensor(ClockifyBaseSensor):
@@ -492,6 +542,7 @@ class _ClockifyFilteredDurationSensor(ClockifyBaseSensor):
         meta = _project_meta(project_details, project_id)
         if meta:
             attrs["project_client_id"] = meta.get("client_id")
+            attrs["project_client"] = meta.get("client_name")
             attrs["project_color"] = meta.get("color")
             attrs["project_billable"] = meta.get("billable")
         return attrs
@@ -622,6 +673,190 @@ class ClockifyWeekWorkDurationSensor(ClockifyBaseSensor):
         meta = _project_meta(project_details, project_id)
         if meta:
             attrs["project_client_id"] = meta.get("client_id")
+            attrs["project_client"] = meta.get("client_name")
             attrs["project_color"] = meta.get("color")
             attrs["project_billable"] = meta.get("billable")
         return attrs
+
+
+class _ClockifyFilteredClientDurationSensor(ClockifyBaseSensor):
+    def _get_client_id(self) -> str | None:
+        raise NotImplementedError
+
+    def _filtered_entries(self) -> list[dict]:
+        if not self.coordinator.data:
+            return []
+        project_details = self.coordinator.data.get("project_details", {})
+        project_ids = _project_ids_for_client(project_details, self._get_client_id())
+        if not project_ids:
+            return []
+        return [
+            e for e in self.coordinator.data.get("today", [])
+            if e.get("projectId") in project_ids
+        ]
+
+    @property
+    def native_value(self) -> int:
+        now = datetime.now(timezone.utc)
+        total = 0
+        for entry in self._filtered_entries():
+            interval = entry.get("timeInterval", {})
+            start_str = interval.get("start")
+            if not start_str:
+                continue
+            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            end_str = interval.get("end")
+            end = (
+                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                if end_str
+                else now
+            )
+            total += int((end - start).total_seconds())
+        return total
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        clients = self.coordinator.data.get("clients", {}) if self.coordinator.data else {}
+        client_id = self._get_client_id()
+        return {
+            "client": clients.get(client_id, "None") if client_id else "None",
+            "client_id": client_id,
+            "entry_count": len(self._filtered_entries()),
+        }
+
+
+class ClockifyTodayWorkClientDurationSensor(_ClockifyFilteredClientDurationSensor):
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "today_work_client_duration",
+            "Today's Work Client Duration",
+        )
+        self._attr_icon = "mdi:domain"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+    def _get_client_id(self) -> str | None:
+        return self.coordinator.work_client_id
+
+
+class ClockifyTodayPersonalClientDurationSensor(_ClockifyFilteredClientDurationSensor):
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "today_personal_client_duration",
+            "Today's Personal Client Duration",
+        )
+        self._attr_icon = "mdi:domain"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+    def _get_client_id(self) -> str | None:
+        return self.coordinator.personal_client_id
+
+
+class ClockifyWeekWorkClientEntriesSensor(ClockifyBaseSensor):
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "week_work_client_entries", "Week's Work Client Entries"
+        )
+        self._attr_icon = "mdi:domain"
+
+    def _filtered_entries(self) -> list[dict]:
+        if not self.coordinator.data:
+            return []
+        project_details = self.coordinator.data.get("project_details", {})
+        project_ids = _project_ids_for_client(
+            project_details, self.coordinator.work_client_id
+        )
+        if not project_ids:
+            return []
+        return [
+            e for e in self.coordinator.data.get("week", [])
+            if e.get("projectId") in project_ids
+        ]
+
+    @property
+    def native_value(self) -> int:
+        return len(self._filtered_entries())
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        clients = self.coordinator.data.get("clients", {}) if self.coordinator.data else {}
+        projects = self.coordinator.data.get("projects", {}) if self.coordinator.data else {}
+        project_details = (
+            self.coordinator.data.get("project_details", {})
+            if self.coordinator.data
+            else {}
+        )
+        client_id = self.coordinator.work_client_id
+        entries = [
+            _entry_attributes(entry, i + 1, projects, project_details)
+            for i, entry in enumerate(self._filtered_entries())
+        ]
+        return {
+            "client": clients.get(client_id, "None") if client_id else "None",
+            "client_id": client_id,
+            "entries": entries,
+        }
+
+
+class ClockifyWeekWorkClientDurationSensor(ClockifyBaseSensor):
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "week_work_client_duration",
+            "Week's Work Client Duration",
+        )
+        self._attr_icon = "mdi:domain"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_native_unit_of_measurement = "s"
+        self._attr_suggested_unit_of_measurement = "h"
+
+    def _filtered_entries(self) -> list[dict]:
+        if not self.coordinator.data:
+            return []
+        project_details = self.coordinator.data.get("project_details", {})
+        project_ids = _project_ids_for_client(
+            project_details, self.coordinator.work_client_id
+        )
+        if not project_ids:
+            return []
+        return [
+            e for e in self.coordinator.data.get("week", [])
+            if e.get("projectId") in project_ids
+        ]
+
+    @property
+    def native_value(self) -> int:
+        now = datetime.now(timezone.utc)
+        total = 0
+        for entry in self._filtered_entries():
+            interval = entry.get("timeInterval", {})
+            start_str = interval.get("start")
+            if not start_str:
+                continue
+            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            end_str = interval.get("end")
+            end = (
+                datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                if end_str
+                else now
+            )
+            total += int((end - start).total_seconds())
+        return total
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        clients = self.coordinator.data.get("clients", {}) if self.coordinator.data else {}
+        client_id = self.coordinator.work_client_id
+        return {
+            "client": clients.get(client_id, "None") if client_id else "None",
+            "client_id": client_id,
+            "entry_count": len(self._filtered_entries()),
+        }
