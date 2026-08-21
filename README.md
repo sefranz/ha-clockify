@@ -123,6 +123,12 @@ Resume a recent time entry (creates a new entry with the same project, task, des
 |-----------|----------|-------------|
 | `entry_index` | No | Index of the recent entry to resume (1 = most recent, up to 10). Falls back to `select.recent_entry` if omitted |
 
+## Dashboard
+
+A ready-made dashboard is included at [`dashboards/clockify_dashboard.yaml`](dashboards/clockify_dashboard.yaml) — current tracking status, start/stop/resume buttons, all the select controls, and today/yesterday/week duration breakdowns.
+
+To use it: **Settings → Dashboards → Add Dashboard → New dashboard from scratch**, then open the new dashboard's three-dot menu → **Edit Dashboard** → three-dot menu again → **Edit in YAML**, and paste in the file's contents.
+
 ## Automation Example
 
 ```yaml

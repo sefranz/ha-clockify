@@ -1,0 +1,36 @@
+blueprint:
+  name: Clockify - Daily tracked time summary
+  description: >
+    Send a notification with today's tracked duration at a time you choose.
+  domain: automation
+  input:
+    duration_entity:
+      name: Clockify "Today's Duration" sensor
+      selector:
+        entity:
+          integration: clockify
+          domain: sensor
+    notify_target:
+      name: Who to notify
+      selector:
+        target:
+    at_time:
+      name: Time to send
+      default: "18:00:00"
+      selector:
+        time:
+
+variables:
+  duration_entity: !input duration_entity
+
+trigger:
+  - trigger: time
+    at: !input at_time
+
+action:
+  - action: notify.send_message
+    target: !input notify_target
+    data:
+      message: >
+        You tracked {{ (states(duration_entity) | float(0) / 3600) | round(2) }}
+        hours today in Clockify.

@@ -1,0 +1,49 @@
+blueprint:
+  name: Clockify - Start tracking on arrival
+  description: >
+    Automatically start a Clockify time entry when a person enters a zone
+    (e.g. clock in when you arrive at the office). Leave the project/task
+    fields blank to use whatever is currently selected in the Clockify
+    Project / Task select entities instead.
+  domain: automation
+  input:
+    person_entity:
+      name: Person
+      selector:
+        entity:
+          domain: person
+    zone_entity:
+      name: Zone
+      selector:
+        entity:
+          domain: zone
+    project_id:
+      name: Clockify project ID
+      description: Leave blank to use the Clockify "Project" select entity.
+      default: ""
+      selector:
+        text:
+    task_id:
+      name: Clockify task ID
+      description: Leave blank to use the Clockify "Task" select entity.
+      default: ""
+      selector:
+        text:
+    description_text:
+      name: Entry description
+      default: ""
+      selector:
+        text:
+
+trigger:
+  - trigger: zone
+    entity_id: !input person_entity
+    zone: !input zone_entity
+    event: enter
+
+action:
+  - action: clockify.start_tracking
+    data:
+      project_id: !input project_id
+      task_id: !input task_id
+      description: !input description_text

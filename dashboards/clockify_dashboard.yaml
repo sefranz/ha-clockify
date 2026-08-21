@@ -1,0 +1,97 @@
+title: Clockify
+views:
+  - title: Clockify
+    path: clockify
+    icon: mdi:clock-outline
+    cards:
+      - type: entities
+        title: Now Tracking
+        entities:
+          - entity: sensor.tracking_status
+          - entity: sensor.tracking_project
+          - entity: sensor.tracking_client
+          - entity: sensor.tracking_task
+          - entity: sensor.tracking_description
+          - entity: sensor.tracking_start_time
+
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Start
+            icon: mdi:play
+            tap_action:
+              action: perform-action
+              perform_action: clockify.start_tracking
+              data: {}
+          - type: button
+            name: Stop
+            icon: mdi:stop
+            tap_action:
+              action: perform-action
+              perform_action: clockify.stop_tracking
+              data: {}
+          - type: button
+            name: Resume Last
+            icon: mdi:history
+            tap_action:
+              action: perform-action
+              perform_action: clockify.resume_entry
+              data: {}
+
+      - type: entities
+        title: Controls
+        entities:
+          - entity: select.project
+          - entity: select.work_project
+          - entity: select.personal_project
+          - entity: select.task
+          - entity: select.work_client
+          - entity: select.personal_client
+          - entity: select.recent_entry
+
+      - type: entities
+        title: Today
+        entities:
+          - entity: sensor.today_duration
+            name: Total
+          - entity: sensor.today_work_project_duration
+            name: Work
+          - entity: sensor.today_personal_project_duration
+            name: Personal
+
+      - type: entities
+        title: This Week
+        entities:
+          - entity: sensor.week_duration
+            name: Total
+          - entity: sensor.week_work_project_duration
+            name: Work
+          - entity: sensor.week_personal_project_duration
+            name: Personal
+
+      - type: entities
+        title: By Client
+        entities:
+          - entity: sensor.today_work_client_duration
+            name: Work (Today)
+          - entity: sensor.today_personal_client_duration
+            name: Personal (Today)
+          - entity: sensor.week_work_client_duration
+            name: Work (Week)
+          - entity: sensor.week_personal_client_duration
+            name: Personal (Week)
+
+      - type: entities
+        title: Yesterday
+        entities:
+          - entity: sensor.yesterday_duration
+            name: Total
+          - entity: sensor.yesterday_work_project_duration
+            name: Work
+          - entity: sensor.yesterday_personal_project_duration
+            name: Personal
+
+      - type: entities
+        title: History
+        entities:
+          - entity: sensor.recent_entries

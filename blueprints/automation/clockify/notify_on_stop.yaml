@@ -1,0 +1,35 @@
+blueprint:
+  name: Clockify - Notify when tracking stops
+  description: >
+    Send a notification whenever the running Clockify time entry ends
+    (the "Tracking: Status" sensor goes from tracking to idle).
+  domain: automation
+  input:
+    status_entity:
+      name: Clockify status sensor
+      description: 'The "Tracking: Status" sensor from your Clockify integration.'
+      selector:
+        entity:
+          integration: clockify
+          domain: sensor
+    notify_target:
+      name: Who to notify
+      selector:
+        target:
+    message:
+      name: Notification message
+      default: "Clockify tracking stopped"
+      selector:
+        text:
+
+trigger:
+  - trigger: state
+    entity_id: !input status_entity
+    from: "tracking"
+    to: "idle"
+
+action:
+  - action: notify.send_message
+    target: !input notify_target
+    data:
+      message: !input message
